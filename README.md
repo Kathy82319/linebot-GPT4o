@@ -1,3 +1,4 @@
+
 // ================== 常數 & 意圖判斷 ==================
 const SPECIAL_DATES = [
   ["10-03", "10-06"],
@@ -28,9 +29,9 @@ const PRICE_WORDS = /(價|價格|費用|房價|多少|有房)/i;
 const TODAY_WORDS = /(今天|今日)/i;
 const LOCAL_WORDS = /(景點|美食|餐廳|酒吧|小吃|義大利|甜點|好吃|好玩|附近|怎麼去|交通|公車|火車|高鐵|柳川|一中|中華夜市|審計|中國醫|夜市)/i;
 const PHOTO_WORDS = /(照片|圖片|相片)/i;
-const DATE_WORDS  = /(\d{1,2}[\/\-月]\d{1,2})/;
 const FACILITY_WORDS = /(設施|設備|庭院|交誼廳|飲水機|咖啡機|飲料機|氣泡水|市景|洗衣|自助洗衣|投幣|送洗|烘衣|腳踏車|單車|租借|YouBike|wifi|wi[- ]?fi|無線網路|寄放|行李|前台|櫃台|入住|退房|check[\- ]?in|check[\- ]?out|停車|寵物|禁菸|一次性|備品|毛巾|牙刷)/i;
-
+const DATE_RANGE_WORDS = /(\d{1,2}[\/\\-月]\d{1,2})\s*(?:-|~|到|至)\s*(\d{1,2}[\/\\-月]\d{1,2})/;
+const DATE_WORDS  = /(\d{1,2}[\/\\-月]\d{1,2})/;
 function isLocalInfoQuery(msg){ return LOCAL_WORDS.test(msg) && !PHOTO_WORDS.test(msg); }
 
 // ================== Worker 入口 ==================
@@ -231,66 +232,58 @@ if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車
   }
 
   // 7) 房價導流（不等 LLM）
+  // 7) *** 房價查詢邏輯重構 ***
   if (PRICE_WORDS.test(message)) {
-    const hasToday = TODAY_WORDS.test(message);
-    const hasDateToken = DATE_WORDS.test(message) || hasToday;
-    let { roomType } = extractRoomAndDate(message);
-    let rt = roomType || fuzzyMatchRoom(message);
+    let roomType = fuzzyMatchRoom(message);
+    const { startDate, endDate, isRange } = extractDates(message);
 
-    // 新增：今天房價若沒有房型 → 預設標準雙人房
-    if (hasToday && !rt) {
-        rt = "標準雙人房";
-    }
-
-    if (!hasDateToken && !rt) {
+    // 引導使用者提供必要資訊
+    if (!startDate && !roomType) {
         await replyToLine(replyToken,
-            "房價會依日期與房型不同～請告訴我：\n• 入住日期（例如 7/20 或 今天）\n• 房型（例如 標準雙人房、景觀雙人房、經濟四人房…）\n範例：7/20 標準雙人房 價格",
+            "請告訴我您想查詢的「日期」與「房型」喔！\n例如：\n• 今天 標準雙人房 價格\n• 9/10-9/12 經濟四人房",
             env
         );
         return;
     }
-    if (!hasDateToken) {
-        await replyToLine(replyToken, `想查哪一天的價格呢？可以輸入「今天」或日期（例如 7/20）。\n範例：今天 ${rt} 價格`, env);
+    if (!startDate) {
+        await replyToLine(replyToken, `想查詢哪一天的 ${roomType} 價格呢？\n可以說「今天」或是一個日期區間（例如 9/10-9/12）。`, env);
         return;
     }
-    if (!rt) {
+    if (!roomType) {
         await replyToLine(replyToken,
-            "想查哪一種房型呢？例如：標準雙人房、標準雙床房、景觀雙人房、經濟四人房、女生背包房…",
+            `想查詢哪一種房型呢？\n我們有：標準雙人房、景觀雙人房、經濟四人房、背包房...等。建議您查詢請按照：日期+房型，會比較容易報價哦`,
             env
         );
         return;
     }
 
-    let qDate;
-    let dateDisplay = "";
-    if (hasToday) {
-        const t = new Date();
-        const y = t.getFullYear();
-        const m = t.getMonth() + 1;
-        const d = t.getDate();
-        // 星期顯示
-        const days = ["日","一","二","三","四","五","六"];
-        const w = days[t.getDay()];
-        dateDisplay = `(${m}月${d}日星期${w})`;
-        qDate = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    } else {
-        qDate = extractRoomAndDate(message).date;
-    }
+    // 查詢並回覆價格
+    try {
+        const result = await calculateTotalPrice(env.DB, roomType, startDate, endDate);
 
-    if (qDate && isSpecialDate(qDate)) {
-        await replyToLine(replyToken, `這段期間（${qDate}）為特殊節日，房價請聯絡櫃檯報價喔～`, env);
-        return;
-    }
-
-    const price = qDate ? await fetchPriceFromD1(env.DB, rt, qDate) : null;
-    if (price) {
-        if (hasToday) {
-            await replyToLine(replyToken, `今天${dateDisplay} ${rt} 的價格是 NT$${price}。\n如果需要其他房型或日期，請再詢問我哦~`, env);
-        } else {
-            await replyToLine(replyToken, `${qDate} ${rt} 的價格是 NT$${price}。\n如果需要其他房型或日期，請再詢問我哦~`, env);
+        if (result.isSpecial) {
+            await replyToLine(replyToken, `您查詢的日期（${result.specialDate}）適逢特殊節日，房價請直接洽詢櫃檯人員喔～`, env);
+            return;
         }
-    } else {
-        await replyToLine(replyToken, `${hasToday ? "今天" : qDate} ${rt} 的價格目前查不到，可能為特殊日期或已滿房，建議聯絡櫃檯喔～`, env);
+
+        if (result.totalPrice > 0) {
+            let replyMsg = "";
+            if (isRange) {
+                replyMsg = `您好，${roomType}\n從 ${formatDate(startDate)} 到 ${formatDate(endDate)} (${result.nights}晚)\n總金額為 NT$${result.totalPrice} 元。`;
+                if (result.priceDetails.length > 1) {
+                     replyMsg += "\n\n每日價格明細：\n" + result.priceDetails.map(p => `${p.date}: NT$${p.price}`).join("\n");
+                }
+            } else {
+                const weekdayStr = `(${getWeekday(startDate)})`;
+                replyMsg = `您好，${formatDate(startDate)}${weekdayStr} ${roomType} 的價格是 NT$${result.totalPrice} 元。`;
+            }
+            await replyToLine(replyToken, replyMsg, env);
+        } else {
+             await replyToLine(replyToken, `抱歉，目前查不到 ${formatDate(startDate)} ${roomType} 的價格，可能是當日已滿房或日期格式有誤，建議直接向櫃檯洽詢喔！`, env);
+        }
+    } catch (e) {
+        console.error("房價查詢出錯:", e);
+        await replyToLine(replyToken, "查詢房價時發生了一點問題，請稍後再試或直接聯絡櫃檯，謝謝！", env);
     }
     return;
 }
@@ -368,12 +361,147 @@ if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車
 
 // ================== 工具函式 ==================
 
-// 判斷特殊節日
-function isSpecialDate(date) {
-  const [, m, d] = date.split("-");
-  const mmdd = `${m}-${d}`;
-  return SPECIAL_DATES.some(([start, end]) => mmdd >= start && mmdd <= end);
+// *** 全新：日期正規化 ***
+function normalizeDate(dateStr, year = new Date().getFullYear()) {
+  const match = dateStr.match(/(\d{1,2})[\/\-月](\d{1,2})/);
+  if (!match) return null;
+  const month = String(match[1]).padStart(2, "0");
+  const day = String(match[2]).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
+
+// *** 全新：格式化日期顯示 ***
+function formatDate(date) {
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+// *** 全新：取得星期幾 ***
+function getWeekday(date) {
+  return "日一二三四五六".charAt(date.getDay());
+}
+
+
+// *** 修改：擷取日期，支援單日與區間 ***
+function extractDates(text) {
+  const todayMatch = TODAY_WORDS.test(text);
+  if (todayMatch) {
+      const today = new Date();
+      return { startDate: today, endDate: today, isRange: false };
+  }
+
+  const rangeMatch = text.match(DATE_RANGE_WORDS);
+  if (rangeMatch) {
+      const start = normalizeDate(rangeMatch[1]);
+      const end = normalizeDate(rangeMatch[2]); // 注意：使用者說的結束日期通常是退房日
+      if (start && end) {
+          // 旅客習慣說「住到N號」，指的是N號退房，所以實際住宿是到 N-1 號的晚上
+          const endDateObj = new Date(end);
+          endDateObj.setDate(endDateObj.getDate() - 1);
+          return { startDate: new Date(start), endDate: endDateObj, isRange: true };
+      }
+  }
+
+  const singleMatch = text.match(DATE_WORDS);
+  if (singleMatch) {
+      const date = normalizeDate(singleMatch[0]);
+      if (date) {
+          return { startDate: new Date(date), endDate: new Date(date), isRange: false };
+      }
+  }
+
+  return { startDate: null, endDate: null, isRange: false };
+}
+
+
+// *** 模糊房型比對 (您的版本已符合需求，微調註解) ***
+function fuzzyMatchRoom(text) {
+const rooms = [
+  // 順序很重要，將更精確的、多字的關鍵字放前面
+  { keys: ["悠活", "家庭", "高級四人"], value: "悠活四人房" },
+  { keys: ["經濟四人"], value: "經濟四人房" },
+  { keys: ["四人", "4人"], value: "經濟四人房" }, // 若只說「四人房」，預設為經濟四人房
+  { keys: ["雙床"], value: "標準雙床房" },
+  { keys: ["景觀", "市景", "view"], value: "景觀雙人房" },
+  { keys: ["標準雙人"], value: "標準雙人房" },
+  { keys: ["雙人", "情人", "2人"], value: "標準雙人房" }, // 若只說「雙人房」，預設為標準雙人房
+  { keys: ["女生", "女背包"], value: "女生背包房" },
+  { keys: ["男生", "男背包"], value: "男生背包房" }
+];
+for (const r of rooms) {
+    if (r.keys.some(k => text.includes(k))) return r.value;
+}
+console.warn("⚠️ 無法辨識房型，輸入為：", text);
+return null;
+}
+
+// *** 沿用，但現在給 calculateTotalPrice 呼叫 ***
+async function fetchPriceFromD1(db, roomType, date) {
+  // 確保傳入的 date 參數是有效的 Date 物件
+  // 如果傳入的是 '2025-11-01' 字串，會先 new Date() 轉換
+  const dateObj = (date instanceof Date) ? date : new Date(date);
+
+  // 如果轉換後是無效日期，直接回傳 null
+  if (isNaN(dateObj.getTime())) {
+    console.error("傳入 fetchPriceFromD1 的日期無效:", date);
+    return null;
+  }
+
+  const stmt = db.prepare("SELECT weekday_price AS 平日, friday_price AS 週五, saturday_price AS 週六 FROM room_prices WHERE room_type = ?");
+  const result = await stmt.bind(roomType).first();
+  if (!result) return null;
+
+  // 使用確保為 Date 物件的 dateObj 進行後續操作
+  const weekday = dateObj.getDay(); // 0=週日, 1=週一, ..., 6=週六
+  if (weekday === 5) return result["週五"]; // 星期五
+  if (weekday === 6 || weekday === 0) return result["週六"]; // 星期六與星期日同價
+  return result["平日"];
+}
+
+// *** 全新：計算日期區間總價 ***
+async function calculateTotalPrice(db, roomType, startDate, endDate) {
+  let totalPrice = 0;
+  let nights = 0;
+  let priceDetails = [];
+  const results = { totalPrice, nights, priceDetails, isSpecial: false, specialDate: '' };
+
+  // 防呆，避免無限迴圈
+  if (!startDate || !endDate || endDate < startDate) {
+      return results;
+  }
+
+  let currentDate = new Date(startDate);
+  while (currentDate <= endDate) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      const [, m, d] = dateStr.split("-");
+      if (isSpecialDate(`${m}-${d}`)) {
+          results.isSpecial = true;
+          results.specialDate = `${m}/${d}`;
+          return results; // 特殊節日直接回傳，不再計算
+      }
+
+      const dailyPrice = await fetchPriceFromD1(db, roomType, currentDate);
+      if (dailyPrice === null) {
+          // 如果某天查不到價格，直接中斷並回傳目前結果
+          console.error(`查無 ${dateStr} ${roomType} 的價格`);
+          return results;
+      }
+
+      totalPrice += dailyPrice;
+      priceDetails.push({ date: formatDate(currentDate), price: dailyPrice });
+      nights++;
+      currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  results.totalPrice = totalPrice;
+  results.nights = nights;
+  return results;
+}
+
+// 判斷特殊節日 (格式調整為 MM-DD)
+function isSpecialDate(mmdd) {
+return SPECIAL_DATES.some(([start, end]) => mmdd >= start && mmdd <= end);
+}
+
 
 // 文字回覆（加入保底文字，避免空字串）
 async function replyToLine(replyToken, text, env) {
@@ -420,32 +548,7 @@ function extractRoomAndDate(text) {
   return { roomType: room, date: `${year}-${month}-${day}` };
 }
 
-// 模糊房型
-function fuzzyMatchRoom(text) {
-  const rooms = [
-    { keys: ["女生", "女背包"], value: "女生背包房" },
-    { keys: ["男生", "男背包"], value: "男生背包房" },
-    { keys: ["悠活", "家庭", "高級四人"], value: "悠活四人房" },
-    { keys: ["四人"], value: "經濟四人房" },
-    { keys: ["雙床"], value: "標準雙床房" },
-    { keys: ["景觀", "市景", "view"], value: "景觀雙人房" },
-    { keys: ["雙人", "情人", "2人"], value: "標準雙人房" }
-  ];
-  for (const r of rooms) if (r.keys.some(k => text.includes(k))) return r.value;
-  console.warn("⚠️ 無法辨識房型，輸入為：", text);
-  return null;
-}
 
-// D1 查價
-async function fetchPriceFromD1(db, roomType, date) {
-  const stmt = db.prepare("SELECT weekday_price AS 平日, friday_price AS 週五, saturday_price AS 週六 FROM room_prices WHERE room_type = ?");
-  const result = await stmt.bind(roomType).first();
-  if (!result) return null;
-  const weekday = new Date(date).getDay();
-  if (weekday === 5) return result["週五"];
-  if (weekday === 6) return result["週六"];
-  return result["平日"];
-}
 
 // GPT：在地資訊
 async function callGPTForLocalInfo(message, apiKey) {
