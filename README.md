@@ -130,69 +130,88 @@ async function handleEvent(message, replyToken, env) {
     );
     return;
   }
-  // 3.x) 交通路線（混合模式：先查 KV，其次 OSM：Nominatim + OSRM）
-if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車|搭車|公車|轉乘|到.*快樂腳旅棧|到.*中華路一段185號)/i.test(message)) {
-  const travel = parseTravelQuery(message); // 解析起點與模式
-  const routesKV = await env.hotelInfoKV.get("hotel_routes", "json");
-  const hotelName = routesKV?.hotel_name || "快樂腳旅棧";
-  const hotelAddr = routesKV?.hotel_address || "台中市中區中華路一段185號";
-  const hotelCoord = routesKV?.hotel_coords || null; // 可選：{lat, lon}
+  // 4) 交通路線查詢 — 優先級提前，確保不會被通用規則攔截
+  if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車|搭車|公車|轉乘|到(快樂腳旅棧|中華路一段185號))/i.test(message)) {
+    
+    // ✨ 偵錯點 #1: 確認程式是否成功進入這個區塊
+    console.log("✅ [DEBUG] 成功進入交通查詢區塊。");
 
-  // 1) 先用 KV 常見起點（最穩）
-  const kvHit = pickRouteFromKV(travel.origin, travel.mode, routesKV);
-  if (kvHit) {
-    await replyToLine(replyToken, kvHit, env);
+    try {
+      const travel = parseTravelQuery(message);
+      // ✨ 偵錯點 #2: 確認起點和模式是否被正確解析
+      console.log(`✅ [DEBUG] 解析使用者查詢: 起點='${travel.origin}', 模式='${travel.mode}'`);
+
+      const routesKV = await env.hotelInfoKV.get("hotel_routes", "json");
+      if (!routesKV) {
+        // ✨ 偵錯點 #3: 如果 KV 讀取失敗，清楚地記錄下來
+        console.error("❌ [DEBUG] 錯誤: hotelInfoKV.get('hotel_routes') 回傳為 null 或 undefined。請檢查 KV 綁定和金鑰名稱。");
+        throw new Error("無法讀取 hotel_routes KV");
+      }
+      console.log("✅ [DEBUG] 成功讀取 hotel_routes KV 資料。");
+
+      const hotelName = routesKV.hotel_name || "快樂腳旅棧";
+      const hotelAddr = routesKV.hotel_address || "台中市中區中華路一段185號10樓";
+
+      const kvHit = pickRouteFromKV(travel.origin, travel.mode, routesKV);
+      if (kvHit) {
+        console.log("✅ [DEBUG] 在 KV 中找到固定路線，直接回覆。");
+        await replyToLine(replyToken, kvHit, env);
+        return;
+      }
+      console.log("🟡 [DEBUG] KV 中無固定路線，準備呼叫外部地圖 API。");
+
+      // ✨ 偵錯點 #4: 分別偵測地圖 API 的呼叫過程
+      let orig, dest;
+      try {
+        console.log(`🟡 [DEBUG] 正在地理編碼目的地: '${hotelAddr}'`);
+        dest = routesKV.hotel_coords || await geocodeNominatim(hotelAddr);
+        console.log("✅ [DEBUG] 目的地編碼成功:", JSON.stringify(dest));
+
+        console.log(`🟡 [DEBUG] 正在地理編碼起點: '${travel.origin}'`);
+        orig = await geocodeNominatim(travel.origin);
+        console.log("✅ [DEBUG] 起點編碼成功:", JSON.stringify(orig));
+      } catch(geoError) {
+        console.error("❌ [DEBUG] 地理編碼 (geocodeNominatim) 失敗:", geoError);
+        throw geoError; // 拋出錯誤，讓外層的 catch 接住
+      }
+      
+      if (orig && dest) {
+        const routeText = await osrmRoute({ origin: orig, dest: dest, mode: travel.mode, hotelName, hotelAddr });
+        if (routeText) {
+          console.log("✅ [DEBUG] OSRM 路線規劃成功，回覆路線。");
+          await replyToLine(replyToken, routeText, env);
+          return;
+        }
+      }
+
+      // 如果所有方法都失敗了，回覆備用方案
+      console.log("🟡 [DEBUG] 所有路線規劃方案均失敗，回覆備用 Google Map 連結。");
+      const fallbackUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(travel.origin)}&destination=${encodeURIComponent(hotelAddr)}`;
+      await replyToLine(replyToken, `抱歉，自動路線規劃暫時無法使用。\n\n建議您直接使用 Google Maps 導航至「${hotelAddr}」\n\n點此直接開啟導航：\n${fallbackUrl}`, env);
+
+    } catch (e) {
+      // ✨ 偵錯點 #5: 捕捉到任何錯誤時，印出詳細的錯誤物件
+      console.error("❌ [DEBUG] 交通查詢區塊發生嚴重錯誤，詳細資訊:", e);
+      await replyToLine(replyToken, "抱歉，查詢交通資訊時發生了一點問題，我已通知專人處理，請您稍候！", env);
+    }
     return;
   }
 
-  // 2) Nominatim 地理編碼（免費）
-  const dest = hotelCoord || await geocodeNominatim(hotelAddr);
-  const orig = await geocodeNominatim(travel.origin);
-  if (orig && dest) {
-    // 3) OSRM 公開路由（免費）
-    const routeText = await osrmRoute({
-      origin: orig,
-      dest: dest,
-      mode: travel.mode,
-      hotelName,
-      hotelAddr
-    });
-    if (routeText) {
-      await replyToLine(replyToken, routeText, env);
-      return;
-    }
-  }
-
-  // 4) 全部失敗 → 安全回覆（附地圖連結）
-  const gmap = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(hotelAddr)}`;
-  await replyToLine(
-    replyToken,
-    `建議用地圖導航查詢「${travel.origin} → ${hotelAddr}」。\n快速開啟：${gmap}`,
-    env
-  );
-  return;
-}
-
-  // 4) 附近美食（KV 硬攔截）— 一定要在 GPT 之前
+  
+  // 5) 附近美食推薦 — 精準意圖
   if (/(附近|周邊|周遭).*(美食|餐廳|小吃|酒吧|吃的|好吃|夜市)|美食推薦|吃什麼|推薦美食|要吃什麼/i.test(message)) {
-    // 你的 KV 結構：{ "nearby_food": [ ... ] }
-    const list = Array.isArray(foodKV?.nearby_food) ? foodKV.nearby_food : (Array.isArray(foodKV) ? foodKV : []);
+    const foodKV = await env.KV_FOOD?.get?.("nearby_food", "json");
+    const list = Array.isArray(foodKV?.nearby_food) ? foodKV.nearby_food : [];
     if (list.length) {
       let fiveMin = "🥢 步行五分鐘可達：\n";
       let tenMin  = "🛍️ 步行十分鐘：\n";
       let bar     = "🍸 酒吧推薦：\n";
-
       list.forEach(item => {
         const line = `• ${item.name}（${item.desc}）｜${item.hours}${item.closed ? `｜公休：${item.closed}` : ""}｜${item.address}`;
-        if ((item.desc || "").includes("酒吧") || (item.address || "").includes("本館樓下")) {
-          bar += line + "\n";
-        } else if ((item.address || "").includes("成功路") || (item.address || "").includes("篤行路") || (item.address || "").includes("台灣大道一段560號") || (item.address || "").includes("中華路一段154巷")) {
-          fiveMin += line + "\n";
-        } else {
-          tenMin += line + "\n";
-        }
+        if ((item.desc || "").includes("酒吧") || (item.address || "").includes("本館樓下")) { bar += line + "\n"; }
+        else if ((item.address || "").includes("成功路") || (item.address || "").includes("篤行路")) { fiveMin += line + "\n"; }
+        else { tenMin += line + "\n"; }
       });
-
       const replyMsg = `${fiveMin}\n${tenMin}\n${bar}`.trim();
       await replyToLine(replyToken, replyMsg, env);
       return;
@@ -200,8 +219,8 @@ if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車
     await replyToLine(replyToken, "目前找不到附近美食資訊，請稍後再試～", env);
     return;
   }
-
-  // 5) QUICK_REPLIES（保留）
+  
+  // 6) QUICK_REPLIES (固定關鍵字回覆)
   for (const rule of QUICK_REPLIES) {
     if (rule.pattern.test(message)) {
       await replyToLine(replyToken, rule.reply, env);
@@ -209,7 +228,9 @@ if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車
     }
   }
 
-  // 6) 設施／規定／旅棧介紹（只依 KV）
+
+
+  // 6-1) 設施／規定／旅棧介紹（只依 KV）
   if (FACILITY_WORDS.test(message) || /介紹|有什麼.*(設施|設備)|館內.*(設施|設備)/i.test(message)) {
     const facts = await getHotelFacts(env);
 
@@ -314,14 +335,34 @@ if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車
     return;
 }
 
-  // 9) 最後一般 GPT & Fallback
+  // 9) 最後一般 GPT & Fallback (使用整合後的知識庫)
   try {
-    const gpt = await callGPTGeneral(message, env.OPENAI_API_KEY);
-    if (gpt) { await replyToLine(replyToken, gpt, env); return; }
+    // 1. 使用 Promise.all 同時取得所有需要的 KV 資料
+    const [basicInfo, routes, food] = await Promise.all([
+        env.hotelInfoKV.get("basic_info", "json"),
+        env.hotelInfoKV.get("hotel_routes", "json"),
+        env.KV_FOOD.get("nearby_food", "json")
+    ]);
+
+    // 2. 將所有資料整合成一個大的「知識庫」物件
+    const knowledgeBase = {
+        generalInfo: basicInfo,
+        transportation: routes,
+        nearbyFood: food
+    };
+
+    // 3. 將整合後的知識庫連同使用者問題一起傳給新的 GPT 函式
+    const gptResponse = await callGPTGeneral(message, knowledgeBase, env.OPENAI_API_KEY);
+    
+    if (gptResponse) {
+      await replyToLine(replyToken, gptResponse, env);
+      return;
+    }
   } catch (e) {
     console.error("💥 GPT 一般回覆失敗：", e);
   }
 
+  // 如果連 GPT 都出錯或沒有回覆，才使用最終的預設訊息
   await replyToLine(replyToken, [
     "不好意思，我不太明白您的問題 😅",
     "不過，您可以直接問我以下這些常見問題喔！",
@@ -682,36 +723,59 @@ function sanitizeNoQuestions(text) {
     .join("\n")
     .trim();
 }
+
+
 // GPT：一般問題
-async function callGPTGeneral(message, apiKey) {
-  if (!apiKey) return null;
-  const system = `你是台中「快樂腳旅棧」的櫃台助理。
+async function callGPTGeneral(message, knowledgeBase, apiKey) {
+  if (!apiKey || !knowledgeBase) return null;
+
+  // 將我們整合後的所有 KV 資料（JSON物件）轉換成清晰的字串，當作 GPT 的參考資料
+  const context = JSON.stringify(knowledgeBase, null, 2);
+
+  const system_prompt = `你是「快樂腳旅棧」的AI客服，你的任務是根據下方提供的【飯店知識庫】，用親切、簡潔的口吻回答使用者的問題。
+
 【回答規則】
-- 只回覆與旅棧/入住/在地資訊直接相關的內容；無關就婉拒並建議聯絡櫃台。
-- 用陳述句，不要提問或引導偏好，不要要求對方提供更多資訊。
-- 最多 5 行，條列清楚，避免寒暄，避免回答不在資料內的答案。`;
+1.  **絕對禁止**回答任何【飯店知識庫】中沒有提到的資訊，嚴禁任何猜測或編造。
+2.  如果資料中明確指出「沒有」某項設施（例如 "laundry": { "available": false }），請直接、肯定地回覆「我們沒有提供喔」，並可補充替代方案。
+3.  如果【飯店知識庫】中找不到使用者問題的相關資訊，**你的唯一標準回覆必須是**：「不好意思，您的問題可能需要由真人櫃檯協助處理，我已經通知他們了，請您稍候喔！」
+4.  你的回答必須完全基於提供的資料，不要添加任何額外的個人意見或建議。
+5.  保持回覆簡短，最多 5 行，盡量條列式說明。
+
+【飯店知識庫】
+${context}`;
 
   const body = {
     model: "gpt-4o",
-    temperature: 0.3,
+    temperature: 0.2, // 溫度調低，讓它更專注於事實，減少創意
     messages: [
-      { role: "system", content: system },
+      { role: "system", content: system_prompt },
       { role: "user", content: message }
     ],
-    max_tokens: 300
+    max_tokens: 300 // Token可以稍微多一點，以應付美食或交通的列表
   };
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify(body)
-  });
-  const raw = await res.text();
-  if (!res.ok) return null;
-  let data; try { data = JSON.parse(raw); } catch { return null; }
-  const out = data.choices?.[0]?.message?.content?.trim() || "";
-  return sanitizeNoQuestions(out);
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const responseText = data.choices?.[0]?.message?.content?.trim() || null;
+    
+    // 最後一道防線：如果 GPT 還是嘗試提問，就攔截它
+    if (responseText && responseText.includes("？") || responseText.includes("嗎？")) {
+        return "您的問題比較複雜，我已通知真人櫃檯，請稍候片刻，謝謝您！";
+    }
+
+    return responseText;
+  } catch (e) {
+    console.error("💥 GPT Fact-Based Q&A 失敗：", e);
+    return null;
+  }
 }
+
 // 解析使用者文字中的起點與模式
 function parseTravelQuery(msg) {
   const mWalk = /(走路|步行)/i.test(msg);
@@ -744,11 +808,16 @@ function pickRouteFromKV(origin, mode, facts) {
 
 // Nominatim 地理編碼（免費，記得帶 User-Agent）
 async function geocodeNominatim(query) {
-  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&countrycodes=tw&q=${encodeURIComponent(query)}`;
+  // ✨ 關鍵修改：加入 viewbox 和 bounded 參數，將搜尋範圍鎖定在台中市區
+  // viewbox=[西經, 北緯, 東經, 南緯]
+  const taichungViewbox = "&viewbox=120.5,24.3,120.8,24.0&bounded=1";
+  
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&countrycodes=tw&q=${encodeURIComponent(query)}${taichungViewbox}`;
+  
   const res = await fetch(url, {
     headers: {
       // 請換成你的信箱，符合 Nominatim 使用規範
-      "User-Agent": "HappyInnBot/1.0 (contact: your-email@example.com)"
+      "User-Agent": "HappyInnBot/1.0 (contact: cath82319@gmail.com)"
     }
   });
   if (!res.ok) return null;
@@ -765,7 +834,7 @@ async function osrmRoute({ origin, dest, mode, hotelName = "目的地", hotelAdd
   const coords = `${origin.lon},${origin.lat};${dest.lon},${dest.lat}`;
   const url = `https://router.project-osrm.org/route/v1/${profile}/${coords}?overview=false&steps=true&alternatives=false&annotations=false`;
 
-  const res = await fetch(url, { headers: { "User-Agent": "HappyInnBot/1.0 (contact: your-email@example.com)" }});
+  const res = await fetch(url, { headers: { "User-Agent": "HappyInnBot/1.0 (contact: cath82319@gmail.com)" }});
   if (!res.ok) return null;
   const data = await res.json().catch(() => null);
   if (!data || data.code !== "Ok" || !Array.isArray(data.routes) || !data.routes.length) return null;
