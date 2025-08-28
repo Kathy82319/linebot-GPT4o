@@ -68,16 +68,19 @@ const CONFIG = {
   },
 
   // --- 正規表示式 (Regex) 意圖判斷區 ---
+// ================== 【已更新】的 INTENTS 區塊 ==================
   INTENTS: {
-    // 將 `.*` 改為 `.*?` (非貪婪模式)，大幅提升效能並避免崩潰
+    // 將判斷拆分成更小的單位，方便組合
+    hasDate: /(今天|今日|\d{1,2}[\/\\-月]\d{1,2})/,
+    hasRoomType: /(悠活|家庭|四人|雙床|景觀|雙人|背包|房型)/i,
+    hasPriceWord: /(價|價格|費用|房價|多少)/i,
+
     isBreakfastPhotoQuery: /(早餐).*?(照片|圖片|相片)/i,
     isTransportationQuery: /(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車|搭車|公車|轉乘|到(快樂腳旅棧|中華路一段185號))/i,
     isFoodQuery: /(附近|周邊|周遭).*?(美食|餐廳|小吃|酒吧|吃的|好吃|夜市)|美食推薦|吃什麼|推薦美食|要吃什麼/i,
     isParkingQuery: /(停車|停車位)/i,
-    
-    // 將照片查詢與早餐照片查詢分開，避免衝突
     isPhotoQuery: /(照片|圖片|相片)/i,
-
+    },
     // 檢查邏輯更嚴謹
     isDateOnlyQuery: (msg) => {
       const hasDate = /(\d{1,2}[\/\\-月]\d{1,2})/.test(msg);
@@ -92,7 +95,7 @@ const CONFIG = {
       return hasPriceWord || (hasDate && hasRoomType);
     },
     isTodayQuery: /(今天|今日)/i,
-  },
+  
   
 // ================== 【已修正】的 QUICK_REPLIES 區塊 ==================
 
@@ -150,12 +153,6 @@ export default {
   },
 };
 
-// =================================================================
-// Part 3: 意圖路由器 (Intent Router)
-// handleEvent 是個乾淨的「總機」，負責轉接給對應的處理函式
-// =================================================================
-// ================== 【偵錯專用】的 handleEvent 函式 ==================
-// =================================================================
 // Part 3: 意圖路由器 (Intent Router)
 // handleEvent 是個乾淨的「總機」，負責轉接給對應的處理函式
 // =================================================================
@@ -163,55 +160,39 @@ async function handleEvent({ message, replyToken, env }) {
   const context = { message, replyToken, env };
 
   // --- 優先處理「固定指令」和「按鈕 Payload」 ---
-  // 這樣可以確保結構化的指令有最高優先級
-  if (message.startsWith('action:')) {
-    return await handleAction(context);
-  }
-  if (message === '主選單') {
-    return await handleMainMenu(context);
-  }
+  if (message.startsWith('action:')) return await handleAction(context);
+  if (message === '主選單') return await handleMainMenu(context);
 
-  // --- 根據我們規劃的架構，處理來自「主選單」的點擊 ---
+  // --- 處理來自「圖文選單」的點擊 ---
   switch (message) {
-    case '查房價／問訂房':
-      return await handlePriceInquiryMenu(context);
-    case '設施／服務':
-      return await handleFacilityMenu(context);
-    case '在地美食推薦':
-      return await handleLocalGuideMenu(context);
-    case '交通指引':
-      return await handleTransportationMenu(context);
-    case '聯絡真人客服':
-      return await handleContactHuman(context);
+    case CONFIG.ACTIONS.MENU_PRICE: return await handlePriceInquiryMenu(context);
+    case CONFIG.ACTIONS.MENU_FACILITY: return await handleFacilityMenu(context);
+    case CONFIG.ACTIONS.MENU_FOOD: return await handleLocalGuideMenu(context);
+    case CONFIG.ACTIONS.MENU_TRANSPORT: return await handleTransportationMenu(context);
+    case CONFIG.ACTIONS.MENU_CONTACT_HUMAN: return await handleContactHuman(context);
   }
 
-  // --- 自然語言意圖判斷 (高優先級：會產生按鈕或複雜互動的) ---
+  // --- 自然語言意圖判斷 ---
   const { INTENTS } = CONFIG;
+  const hasDate = INTENTS.hasDate.test(message);
+  const hasRoomType = INTENTS.hasRoomType.test(message);
+  const hasPriceWord = INTENTS.hasPriceWord.test(message);
 
-  // ✨ 關鍵修改：將這些精準判斷，移到 QUICK_REPLIES 之前 ✨
-  if (INTENTS.isParkingQuery.test(message)) {
-    return await handleParking(context);
-  }
-  if (INTENTS.isBreakfastPhotoQuery.test(message)) {
-    return await handleBreakfastPhoto(context);
-  }
-  if (INTENTS.isTransportationQuery.test(message)) {
-    return await handleTransportationRouting(context);
-  }
-  if (INTENTS.isFoodQuery.test(message)) {
-    return await handleFood(context);
-  }
-  if (INTENTS.isPhotoQuery.test(message) && !INTENTS.isBreakfastPhotoQuery.test(message)) {
-    return await handlePhoto(context);
-  }
-  if (INTENTS.isDateOnlyQuery(message)) {
-    return await handleDateOnly(context);
-  }
-  if (INTENTS.isPriceQuery(message)) {
-    return await handlePriceCalculation(context);
-  }
+  // --- 高優先級判斷 (會產生互動或按鈕的) ---
+  if (INTENTS.isParkingQuery.test(message)) return await handleParking(context);
+  if (INTENTS.isBreakfastPhotoQuery.test(message)) return await handleBreakfastPhoto(context);
+  if (INTENTS.isTransportationQuery.test(message)) return await handleTransportationRouting(context);
+  if (INTENTS.isFoodQuery.test(message)) return await handleFood(context);
+  
+  // --- 價格與日期相關的判斷 (最關鍵的邏輯) ---
+  if (hasDate && hasRoomType) return await handlePriceCalculation(context); // e.g., "11/3 雙人房"
+  if (hasPriceWord) return await handlePriceCalculation(context); // e.g., "雙人房多少錢"
+  if (hasDate && !hasRoomType) return await handleDateOnly(context, message); // e.g., "11/3"
+  
+  // --- 其他判斷 ---
+  if (INTENTS.isPhotoQuery.test(message)) return await handlePhoto(context);
 
-  // --- 靜態回覆 (中優先級：簡單的純文字問答) ---
+  // --- 靜態回覆 (中優先級) ---
   for (const rule of CONFIG.QUICK_REPLIES) {
     if (rule.pattern.test(message)) {
       return await replyToLine(replyToken, rule.reply, env);
@@ -239,21 +220,49 @@ async function handleAction({ message, replyToken, env }) {
 
   // 根據我們在 CONFIG 中定義的 ACTION payload 來決定要做什麼
   switch (message) {
+    // --- 停車流程 ---
     case CONFIG.ACTIONS.NAVIGATE_PARKING:
-      const mapUrl = "https://maps.app.goo.gl/sgYiziTeJNqSybkW6"; // 未來可以從 KV 讀取
+      const mapUrl = "https://maps.app.goo.gl/sgYiziTeJNqSybkW6";
       return await replyToLine(replyToken, `好的，這是前往「第二市場停車場」的 Google Maps 導航連結：\n${mapUrl}`, env);
-    
     case CONFIG.ACTIONS.SHOW_PARKING_RULES:
       return await replyToLine(replyToken, CONFIG.MESSAGES.PARKING_RULES, env);
-      
-    case CONFIG.ACTIONS.SHOW_ROOM_TYPE_PHOTOS:
-      const buttons = [
-          { label: "景觀雙人房照片", payload: "景觀雙人房照片" },
-          { label: "經濟四人房照片", payload: "經濟四人房照片" },
-          { label: "女生背包房照片", payload: "女生背包房照片" },
-          { label: "公共空間照片", payload: "交誼廳照片" },
-      ];
-      return await replyWithButtons(replyToken, "您想看哪一種房型的照片呢？", buttons, env);
+
+    // --- 房價流程 ---
+    case CONFIG.ACTIONS.PRICE_ASK:
+      return await replyToLine(replyToken, CONFIG.MESSAGES.PRICE_INPUT_PROMPT, env);
+    case CONFIG.ACTIONS.PRICE_SHOW_ROOMS:
+      return await handleRoomTypeCarousel(context);
+
+    // --- 設施流程 ---
+    case CONFIG.ACTIONS.FACILITY_WIFI:
+      return await replyToLine(replyToken, CONFIG.MESSAGES.WIFI_INFO, env);
+    case CONFIG.ACTIONS.FACILITY_PARKING:
+      return await handleFacilityMenu_Parking(context); // 停車有下一層
+    case CONFIG.ACTIONS.FACILITY_LUGGAGE:
+      return await replyToLine(replyToken, CONFIG.MESSAGES.LUGGAGE_INFO, env);
+
+    // --- 在地嚮導流程 ---
+    case CONFIG.ACTIONS.GUIDE_FOOD:
+      return await handleFoodCarousel(context);
+    
+    // --- 交通流程 ---
+    case CONFIG.ACTIONS.TRANSPORT_FROM_TRA:
+      return await handleTransportationMenu_TRA(context);
+    case CONFIG.ACTIONS.TRANSPORT_FROM_HSR:
+      const hsrText = (await env.hotelInfoKV.get("hotel_routes", "json"))?.common.find(r => r.direction === "from_hsr_to_hotel")?.text;
+      return await replyToLine(replyToken, hsrText || "高鐵路線查詢失敗", env);
+    case CONFIG.ACTIONS.TRANSPORT_BY_CAR:
+      return await replyToLine(replyToken, CONFIG.MESSAGES.TRANSPORT_ROUTING_PROMPT, env);
+    case CONFIG.ACTIONS.TRANSPORT_TRA_BUS:
+        const busText = (await env.hotelInfoKV.get("hotel_routes", "json"))?.common.find(r => r.direction === "from_station_to_hotel" && r.modes.includes('bus'))?.text;
+        return await replyToLine(replyToken, busText || "火車站公車路線查詢失敗", env);
+    case CONFIG.ACTIONS.TRANSPORT_TRA_WALK:
+        const walkText = (await env.hotelInfoKV.get("hotel_routes", "json"))?.common.find(r => r.direction === "from_station_to_hotel" && r.modes.includes('walk'))?.text;
+        return await replyToLine(replyToken, walkText || "火車站步行路線查詢失敗", env);
+
+    // --- 聯絡真人 ---
+    case CONFIG.ACTIONS.CONTACT_HUMAN:
+      return await handleContactHuman(context);
 
     default:
       console.log(`未知的 Action: ${message}`);
@@ -261,89 +270,111 @@ async function handleAction({ message, replyToken, env }) {
   }
 }
 
-// --- 處理停車查詢 (使用按鈕) ---
-async function handleParking({ replyToken, env }) {
-  const replyText = "關於停車，我們有提供補助。若您需要導航，推薦您前往附近的「第二市場停車場」，從旅棧步行約 5 分鐘即可抵達。";
+// --- 處理主選單 & 子選單的顯示 ---
+async function handleMainMenu({ replyToken, env }) {
+  const text = "您好！我是快樂腳旅棧的 AI 助理，請問需要什麼服務呢？";
   const buttons = [
-    { label: "📍 導航至第二市場停車場", payload: CONFIG.ACTIONS.NAVIGATE_PARKING },
-    { label: "ℹ️ 了解詳細停車規則", payload: CONFIG.ACTIONS.SHOW_PARKING_RULES }
+      { label: "查房價／問訂房", payload: CONFIG.ACTIONS.MENU_PRICE },
+      { label: "設施／服務", payload: CONFIG.ACTIONS.MENU_FACILITY },
+      { label: "在地美食推薦", payload: CONFIG.ACTIONS.MENU_FOOD },
+      { label: "交通指引", payload: CONFIG.ACTIONS.MENU_TRANSPORT },
   ];
-  await replyWithButtons(replyToken, replyText, buttons, env);
+  await replyWithButtons(replyToken, text, buttons, env);
 }
 
-// --- 處理早餐照片 ---
-async function handleBreakfastPhoto({ replyToken, env }) {
-  try {
-    const menuObj = await env.KV_MENU?.get?.("breakfast_menu", "json");
-    const photos = menuObj?.breakfast_menu?.map(i => i.image).filter(Boolean).slice(0, 5) || [];
-    if (photos.length > 0) {
-      const msgs = photos.map(url => ({ type: "image", originalContentUrl: url, previewImageUrl: url }));
-      await replyToLineMultiple(replyToken, msgs, env);
-    } else {
-      await replyToLine(replyToken, CONFIG.MESSAGES.BREAKFAST_PHOTO_NOT_FOUND, env);
-    }
-  } catch (e) {
-    console.error("💥 早餐照片處理失敗:", e);
-    await replyToLine(replyToken, CONFIG.MESSAGES.GENERIC_ERROR, env);
-  }
+async function handlePriceInquiryMenu({ replyToken, env }) {
+  const text = "想了解訂房資訊嗎？請選擇您的需求：";
+  const buttons = [
+    { label: "📅 查詢特定日期房價", payload: CONFIG.ACTIONS.PRICE_ASK },
+    { label: "🏠 查看所有房型介紹", payload: CONFIG.ACTIONS.PRICE_SHOW_ROOMS },
+    { label: "🧑‍💼 聯絡專人", payload: CONFIG.ACTIONS.CONTACT_HUMAN },
+  ];
+  await replyWithButtons(replyToken, text, buttons, env);
 }
 
-// --- 處理交通(自然語言) ---
-async function handleTransportationRouting({ message, replyToken, env }) {
-    const hotelAddr = "快樂腳旅棧 台中市中區中華路一段185號";
-    const travel = parseTravelQuery(message);
-    const fallbackReply = CONFIG.MESSAGES.TRANSPORT_ERROR_FALLBACK(travel.origin, hotelAddr);
+async function handleFacilityMenu({ replyToken, env }) {
+  const text = "想了解我們提供的設施與服務嗎？請選擇您感興趣的項目：";
+  const buttons = [
+    { label: "📶 WiFi 密碼", payload: CONFIG.ACTIONS.FACILITY_WIFI },
+    { label: "🅿️ 停車資訊", payload: CONFIG.ACTIONS.FACILITY_PARKING },
+    { label: "🧳 行李寄放", payload: CONFIG.ACTIONS.FACILITY_LUGGAGE },
+  ];
+  await replyWithButtons(replyToken, text, buttons, env);
+}
 
-    try {
-        const routesKV = await env.hotelInfoKV.get("hotel_routes", "json");
-        if (!routesKV) throw new Error("無法讀取 hotel_routes KV");
+async function handleFacilityMenu_Parking({ replyToken, env }) {
+    const text = "關於停車，我們有提供補助。推薦您前往附近的「第二市場停車場」。";
+    const buttons = [
+        { label: "📍 導航至停車場", payload: CONFIG.ACTIONS.NAVIGATE_PARKING },
+        { label: "ℹ️ 了解詳細規則", payload: CONFIG.ACTIONS.SHOW_PARKING_RULES }
+    ];
+    await replyWithButtons(replyToken, text, buttons, env);
+}
 
-        const kvHit = pickRouteFromKV(travel.origin, travel.mode, routesKV);
-        if (kvHit) return await replyToLine(replyToken, kvHit, env);
+async function handleLocalGuideMenu({ replyToken, env }) {
+  const text = "沒問題！想當個在地人嗎？讓我為您推薦：";
+  const buttons = [
+    { label: "🍜 附近必吃美食", payload: CONFIG.ACTIONS.GUIDE_FOOD },
+    { label: "📸 走路就能到的景點", payload: CONFIG.ACTIONS.GUIDE_SIGHTS },
+    { label: "☕ 私藏咖啡廳名單", payload: CONFIG.ACTIONS.GUIDE_CAFES },
+  ];
+  await replyWithButtons(replyToken, text, buttons, env);
+} 
 
-        const hotelFullName = routesKV.hotel_name || "快樂腳旅棧";
-        const hotelFullAddr = routesKV.hotel_address || "台中市中區中華路一段185號10樓";
-        
-        const dest = routesKV.hotel_coords || await geocodeNominatim(hotelFullAddr);
-        const orig = await geocodeNominatim(travel.origin);
-        
-        if (orig && dest) {
-            const routeText = await osrmRoute({ origin: orig, dest: dest, mode: travel.mode, hotelName: hotelFullName, hotelAddr: hotelFullAddr });
-            if (routeText) return await replyToLine(replyToken, routeText, env);
+async function handleTransportationMenu({ replyToken, env }) {
+  const text = "好的，請問您是從哪裡出發呢？";
+  const buttons = [
+    { label: "🚆 從台中火車站", payload: CONFIG.ACTIONS.TRANSPORT_FROM_TRA },
+    { label: "🚄 從台中高鐵站", payload: CONFIG.ACTIONS.TRANSPORT_FROM_HSR },
+    { label: "🚗 自行開車／其他地點", payload: CONFIG.ACTIONS.TRANSPORT_BY_CAR },
+  ];
+  await replyWithButtons(replyToken, text, buttons, env);
+}
+
+async function handleTransportationMenu_TRA({ replyToken, env }) {
+    const text = "從火車站過來，推薦您選擇：";
+    const buttons = [
+        { label: "🚌 搭公車 (約 10 分鐘)", payload: CONFIG.ACTIONS.TRANSPORT_TRA_BUS },
+        { label: "🚶‍♂️ 散步過來 (約 25 分鐘)", payload: CONFIG.ACTIONS.TRANSPORT_TRA_WALK }
+    ];
+    await replyWithButtons(replyToken, text, buttons, env);
+}
+
+async function handleContactHuman({ replyToken, env }) {
+  await replyToLine(replyToken, CONFIG.MESSAGES.CONTACT_HUMAN_PROMPT, env);
+}
+
+// --- 處理實際功能 (之前已有的函式) ---
+async function handleRoomTypeCarousel({ replyToken, env }) {
+    const roomCards = [
+        {
+            imageUrl: "https://i.imgur.com/your-image-1.jpg", // 請替換成您的圖片網址
+            title: "景觀雙人房", text: "高樓層市景，享受台中百萬夜景。",
+            buttons: [ { label: "看更多照片", payload: "景觀雙人房照片" }, { label: "查這間房價", payload: CONFIG.ACTIONS.PRICE_ASK } ]
+        },
+        {
+            imageUrl: "https://i.imgur.com/your-image-2.jpg", // 請替換成您的圖片網址
+            title: "經濟四人房", text: "空間寬敞，CP值首選，適合家庭出遊。",
+            buttons: [ { label: "看更多照片", payload: "經濟四人房照片" }, { label: "查這間房價", payload: CONFIG.ACTIONS.PRICE_ASK } ]
         }
-
-        await replyToLine(replyToken, fallbackReply, env);
-    } catch (e) {
-        console.error("💥 交通查詢處理失敗:", e);
-        await replyToLine(replyToken, fallbackReply, env);
-    }
+    ];
+    await replyWithCarousel(replyToken, "我們的房型介紹", roomCards, env);
 }
 
-// --- 處理美食 ---
-async function handleFood({ message, replyToken, env }) {
-    try {
-        const foodKV = await env.KV_FOOD?.get?.("nearby_food", "json");
-        const list = foodKV?.nearby_food || [];
-        if (list.length > 0) {
-            // ... (這裡先暫用舊的純文字回覆，未來可以升級為卡片) ...
-            let fiveMin = "🥢 步行五分鐘可達：\n";
-            let tenMin = "🛍️ 步行十分鐘：\n";
-            let bar = "🍸 酒吧推薦：\n";
-            list.forEach(item => {
-                const line = `• ${item.name}（${item.desc}）｜${item.hours}${item.closed ? `｜公休：${item.closed}` : ""}｜${item.address}`;
-                if ((item.desc || "").includes("酒吧") || (item.address || "").includes("本館樓下")) { bar += line + "\n"; }
-                else if ((item.address || "").includes("成功路") || (item.address || "").includes("篤行路")) { fiveMin += line + "\n"; }
-                else { tenMin += line + "\n"; }
-            });
-            const replyMsg = `${fiveMin}\n${tenMin}\n${bar}`.trim();
-            await replyToLine(replyToken, replyMsg, env);
-        } else {
-            await replyToLine(replyToken, CONFIG.MESSAGES.FOOD_NOT_FOUND, env);
-        }
-    } catch (e) {
-        console.error("💥 美食查詢處理失敗:", e);
-        await replyToLine(replyToken, CONFIG.MESSAGES.GENERIC_ERROR, env);
+async function handleFoodCarousel({ replyToken, env }) {
+    const foodKV = await env.KV_FOOD.get("nearby_food", "json");
+    if (!foodKV || !foodKV.nearby_food) {
+        return await replyToLine(replyToken, CONFIG.MESSAGES.FOOD_NOT_FOUND, env);
     }
+    const foodCards = foodKV.nearby_food.slice(0, 10).map(food => ({
+        imageUrl: food.imageUrl || "https://i.imgur.com/default-food.jpg", // 請在KV中為美食加上圖片網址
+        title: `${food.name} (${food.desc})`, text: `營業時間：${food.hours}`,
+        buttons: [
+            { label: "📍 導航過去", payload: `從這裡到 ${food.address}` },
+            { label: "👍 了解更多", payload: `${food.name} 的介紹` }
+        ]
+    }));
+    await replyWithCarousel(replyToken, "為您推薦附近美食", foodCards, env);
 }
 
 // --- 處理房型照片 ---
@@ -351,7 +382,7 @@ async function handlePhoto({ message, replyToken, env }) {
     if (message.trim() === '照片' || message.trim() === '相片') {
         return await handleAction({ message: CONFIG.ACTIONS.SHOW_ROOM_TYPE_PHOTOS, replyToken, env });
     }
-    try {
+    try { 
         const roomPhotoKV = await env.KV_ROOM?.get?.("room_photos", "json");
         const { roomType } = extractRoomAndDate(message);
         if (roomType && roomPhotoKV && roomPhotoKV[roomType]) {
@@ -369,15 +400,19 @@ async function handlePhoto({ message, replyToken, env }) {
 }
 
 // --- 處理只給日期的詢問 ---
-async function handleDateOnly({ replyToken, env }) {
-    // 從 CONFIG 取得訊息，並用按鈕引導
-    const text = CONFIG.MESSAGES.DATE_ONLY_PROMPT;
-    const buttons = [
-        { label: "標準雙人房", payload: "今天 標準雙人房 價格" },
-        { label: "景觀雙人房", payload: "今天 景觀雙人房 價格" },
-        { label: "經濟四人房", payload: "今天 經濟四人房 價格" },
-    ];
-    await replyWithButtons(replyToken, text, buttons, env);
+async function handleDateOnly({ replyToken, env }, dateStr) {
+  // `dateStr` 就是我們從 handleEvent 傳進來的日期字串，例如 "11/3-11/15"
+  
+  const text = "好的，請問您想查詢的房型是？";
+  
+  // ✨ 關鍵修改處 ✨
+  // 我們使用傳進來的 `dateStr` 來動態組合 payload
+  const buttons = [
+    { label: "標準雙人房", payload: `${dateStr} 標準雙人房` },
+    { label: "景觀雙人房", payload: `${dateStr} 景觀雙人房` },
+    { label: "經濟四人房", payload: `${dateStr} 經濟四人房` },
+  ];
+  await replyWithButtons(replyToken, text, buttons, env);
 }
 
 // --- 處理房價(自然語言) ---
