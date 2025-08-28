@@ -18,7 +18,7 @@ const QUICK_REPLIES = [
 ★ 每房每日補助一台車，最高 100 元
 ★ 需出示紙本停車單據（電子發票無法補助）
 ★ 限距離本館 1 公里內的一般費率停車場或停車格喔！` },
-  { pattern: /(刷牙|牙刷|拖鞋|一次性|毛巾|浴巾|沐浴|洗髮|刮鬍刀|梳子|浴帽)/i,
+  { pattern: /(刷牙|牙刷|拖鞋|一次性|毛巾|浴巾|沐浴|洗髮|刮鬍刀|梳子|浴帽|備品)/i,
     reply: "從 114 年起我們不再主動提供牙刷、刮鬍刀、拖鞋等一次性備品喔～如果需要的話可以到櫃檯購買。\n不過洗沐浴乳、洗手乳、毛巾浴巾都還是有提供的！\n p.s.背包房需自備毛巾浴巾" },
   { pattern: /(訂房|預訂|預定|空房|還有房間)/i, reply: "訂房的部分要由櫃台人員協助喔～請您稍等一下，會有專人回覆您！" },
   { pattern: /(附早餐|有早餐|看.*菜單|想看菜單|早餐菜單|菜單內容)/i,
@@ -32,6 +32,8 @@ const PHOTO_WORDS = /(照片|圖片|相片)/i;
 const FACILITY_WORDS = /(設施|設備|庭院|交誼廳|飲水機|咖啡機|飲料機|氣泡水|市景|洗衣|自助洗衣|投幣|送洗|烘衣|腳踏車|單車|租借|YouBike|wifi|wi[- ]?fi|無線網路|寄放|行李|前台|櫃台|入住|退房|check[\- ]?in|check[\- ]?out|停車|寵物|禁菸|一次性|備品|毛巾|牙刷)/i;
 const DATE_RANGE_WORDS = /(\d{1,2}[\/\\-月]\d{1,2})\s*(?:-|~|到|至)\s*(\d{1,2}[\/\\-月]\d{1,2})/;
 const DATE_WORDS  = /(\d{1,2}[\/\\-月]\d{1,2})/;
+// (請加在最上面的常數宣告區)
+const ROOM_TYPE_WORDS = /(悠活|家庭|高級四人|經濟四人|四人|4人|雙床|景觀|市景|view|標準雙人|雙人|情人|2人|女生|女背包|男生|男背包)/i;
 function isLocalInfoQuery(msg){ return LOCAL_WORDS.test(msg) && !PHOTO_WORDS.test(msg); }
 
 // ================== Worker 入口 ==================
@@ -115,7 +117,7 @@ async function handleEvent(message, replyToken, env) {
         return;
       }
     }
-    await replyToLine(replyToken, "目前找不到這個房型的照片，請再確認房型名稱或詢問櫃檯喔～", env);
+    await replyToLine(replyToken, "您想看哪一種照片呢？例如：交誼廳、景觀房、雙床房、經濟四人房、背包房等～，並[房型+照片]方便我給你看哦", env);
     return;
   }
 
@@ -123,7 +125,7 @@ async function handleEvent(message, replyToken, env) {
   if (/(房型|交誼廳|環境|房間).*(照片|圖片|相片)?/i.test(message) && !/早餐/.test(message)) {
     await replyToLine(
       replyToken,
-      "您想看哪一種照片呢？例如：交誼廳、景觀房、雙床房、經濟四人房、背包房等～，並請+照片",
+      "您想看哪一種照片呢？例如：交誼廳、景觀房、雙床房、經濟四人房、背包房等～，並請[房型+照片]",
       env
     );
     return;
@@ -208,7 +210,7 @@ if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車
   }
 
   // 6) 設施／規定／旅棧介紹（只依 KV）
-  if (FACILITY_WORDS.test(message) || /(介紹|有什麼|館內).*(設施|設備)/i.test(message)) {
+  if (FACILITY_WORDS.test(message) || /介紹|有什麼.*(設施|設備)|館內.*(設施|設備)/i.test(message)) {
     const facts = await getHotelFacts(env);
 
     if (/洗衣|自助洗衣|投幣|送洗|烘衣/.test(message) && facts?.nonFacilities?.laundry?.available === false) {
@@ -231,55 +233,79 @@ if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車
     return;
   }
 
-  // 7) 房價導流（不等 LLM）
-  // 7) *** 房價查詢邏輯重構 ***
-  if (PRICE_WORDS.test(message)) {
-    let roomType = fuzzyMatchRoom(message);
-    const { startDate, endDate, isRange } = extractDates(message);
+   // 7) *** 新增：意圖不明的日期查詢攔截 (在主要邏輯前) ***
+  // 條件：訊息裡有日期，但「沒有」房型關鍵字，也「沒有」價格關鍵字
+  if (DATE_WORDS.test(message) && !ROOM_TYPE_WORDS.test(message) && !PRICE_WORDS.test(message)) {
+    await replyToLine(
+      replyToken,
+      "您好，請問是想查詢這個日期的房價嗎？\n請告訴我您想查詢的「房型」喔！\n\n我們有：標準雙人房、景觀雙人房、經濟四人房、背包房等。",
+      env
+    );
+    // 攔截後就結束，不讓它繼續往下跑到 GPT
+    return;
+  }
 
-    // 引導使用者提供必要資訊
-    if (!startDate && !roomType) {
-        await replyToLine(replyToken,
-            "請告訴我您想查詢的「日期」與「房型」喔！\n例如：\n• 今天 標準雙人房 價格\n• 9/10-9/12 經濟四人房",
+  // 8) *** 主要房價查詢邏輯 (擴展觸發條件 + 修正日期錯誤) ***
+  const isPriceQuery = PRICE_WORDS.test(message) || (DATE_WORDS.test(message) && ROOM_TYPE_WORDS.test(message));
+
+  if (isPriceQuery) {
+    let roomType = fuzzyMatchRoom(message);
+    const dateInfo = extractDates(message);
+
+    // 處理查詢明年日期的情況
+    if (dateInfo.isNextYear) {
+        await replyToLine(
+            replyToken,
+            `您好，您查詢的日期 (${dateInfo.dateString}) 為下個年度，我們尚未開放明年的訂房與報價喔，感謝您的詢問！`,
             env
         );
         return;
     }
-    if (!startDate) {
-        await replyToLine(replyToken, `想查詢哪一天的 ${roomType} 價格呢？\n可以說「今天」或是一個日期區間（例如 9/10-9/12）。`, env);
+
+    // 引導使用者提供必要資訊
+    if (!dateInfo.startDate && !roomType) {
+        await replyToLine(replyToken, "請告訴我您想查詢的「日期」與「房型」喔！\n如果想知道價格請打上「日期」與「房型」，例如：11/1-11/3 標準雙人房", env);
+        return;
+    }
+    if (!dateInfo.startDate) {
+        await replyToLine(replyToken, `想查詢哪一天的 ${roomType} 價格呢？\n如果想知道價格請打上「日期」與「房型」，例如：11/1-11/3 標準雙人房`, env);
         return;
     }
     if (!roomType) {
-        await replyToLine(replyToken,
-            `想查詢哪一種房型呢？\n我們有：標準雙人房、景觀雙人房、經濟四人房、背包房...等。建議您查詢請按照：日期+房型，會比較容易報價哦`,
-            env
-        );
+        await replyToLine(replyToken, `想查詢哪一種房型呢？\n我們有：標準雙人/床房、景觀雙人房、經濟/悠活四人房、背包房...等。\n如果想知道價格請打上「日期」與「房型」，例如：11/1-11/3 標準雙人房`, env);
         return;
     }
 
+    const AVAILABILITY_DISCLAIMER = "\n\n提醒您：此為系統自動報價，實際空房狀況仍需由專人為您確認喔！";
+
     // 查詢並回覆價格
     try {
-        const result = await calculateTotalPrice(env.DB, roomType, startDate, endDate);
+        const result = await calculateTotalPrice(env.DB, roomType, dateInfo.startDate, dateInfo.endDate);
 
         if (result.isSpecial) {
-            await replyToLine(replyToken, `您查詢的日期（${result.specialDate}）適逢特殊節日，房價請直接洽詢櫃檯人員喔～`, env);
+            await replyToLine(replyToken, `您查詢的日期（${result.specialDate}）適逢特殊節日，房價稍等真人櫃檯報價哦～`, env);
             return;
         }
 
         if (result.totalPrice > 0) {
             let replyMsg = "";
-            if (isRange) {
-                replyMsg = `您好，${roomType}\n從 ${formatDate(startDate)} 到 ${formatDate(endDate)} (${result.nights}晚)\n總金額為 NT$${result.totalPrice} 元。`;
+            if (dateInfo.isRange) {
+                const displayEndDate = new Date(dateInfo.endDate);
+                displayEndDate.setDate(displayEndDate.getDate() + 1);
+                
+                replyMsg = `您好，${roomType}\n從 ${formatDate(dateInfo.startDate)} 到 ${formatDate(displayEndDate)} (${result.nights}晚)\n總金額為 NT$${result.totalPrice} 元。`;
+                
                 if (result.priceDetails.length > 1) {
                      replyMsg += "\n\n每日價格明細：\n" + result.priceDetails.map(p => `${p.date}: NT$${p.price}`).join("\n");
                 }
             } else {
-                const weekdayStr = `(${getWeekday(startDate)})`;
-                replyMsg = `您好，${formatDate(startDate)}${weekdayStr} ${roomType} 的價格是 NT$${result.totalPrice} 元。`;
+                const weekdayStr = `(${getWeekday(dateInfo.startDate)})`;
+                replyMsg = `您好，${formatDate(dateInfo.startDate)}${weekdayStr} ${roomType} 的價格是 NT$${result.totalPrice} 元。`;
             }
+            replyMsg += AVAILABILITY_DISCLAIMER;
             await replyToLine(replyToken, replyMsg, env);
         } else {
-             await replyToLine(replyToken, `抱歉，目前查不到 ${formatDate(startDate)} ${roomType} 的價格，可能是當日已滿房或日期格式有誤，建議直接向櫃檯洽詢喔！`, env);
+             await replyToLine(replyToken, `抱歉，目前查不到 ${formatDate(dateInfo.startDate)} ${roomType} 的價格，可能是當日已無空房或日期格式有誤，建議直接向櫃檯洽詢喔！`, env);
         }
     } catch (e) {
         console.error("房價查詢出錯:", e);
@@ -287,60 +313,6 @@ if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車
     }
     return;
 }
-
-
-
-  // 8) LLM 意圖 & 其餘分支（最後才進 GPT）
-  if (isLocalInfoQuery(message)) {
-    // 這裡仍保留在地 GPT，但因為我們已經把「美食」專案硬攔截了，所以不會亂推全台
-    try {
-      const text = await callGPTForLocalInfo(message, env.OPENAI_API_KEY);
-      await replyToLine(replyToken, text || "我這邊暫時查不到相關資訊，您可以先跟櫃檯確認～", env);
-    } catch {
-      await replyToLine(replyToken, "抱歉我這邊暫時忙線上，請稍後再問我一次～", env);
-    }
-    return;
-  }
-
-  const intent = await classifyIntent(message, env.OPENAI_API_KEY);
-  console.log("🧭 intent:", intent);
-
-  if (intent?.type === "PHOTOS") {
-    const rt = intent.roomType || fuzzyMatchRoom(message);
-    if (!rt) { await replyToLine(replyToken, "想看哪種房型的照片呢？例如：景觀雙人房、標準雙床房…", env); return; }
-    const kv = await env.KV_ROOM.get("room_photos", "json");
-    const urls = kv?.[rt];
-    if (Array.isArray(urls) && urls.length) {
-      const photos = urls.slice(0, 5).map(url => ({ type: "image", originalContentUrl: url, previewImageUrl: url }));
-      await replyToLineMultiple(replyToken, photos, env);
-    } else {
-      await replyToLine(replyToken, `目前找不到「${rt}」的照片，換個房型試試看嗎？`, env);
-    }
-    return;
-  }
-
-  if (intent?.type === "LOCAL_INFO") {
-    const text = await callGPTForLocalInfo(message, env.OPENAI_API_KEY);
-    await replyToLine(replyToken, text || "我這邊暫時查不到，您可以先跟櫃檯確認～", env);
-    return;
-  }
-
-  if (intent?.type === "PRICE_TODAY") {
-    const rt = intent.roomType || fuzzyMatchRoom(message) || "標準雙人房";
-    const t = new Date(); const y = t.getFullYear(); const m = String(t.getMonth() + 1).padStart(2, "0"); const d = String(t.getDate()).padStart(2, "0");
-    const dateStr = `${y}-${m}-${d}`;
-    const price = await fetchPriceFromD1(env.DB, rt, dateStr);
-    await replyToLine(replyToken, price ? `今天 ${rt} 的價格是 NT$${price}。` : `今天 ${rt} 的價格查不到，可能為特殊日期或已滿房，建議聯絡櫃檯喔～`, env);
-    return;
-  }
-
-  if (intent?.type === "PRICE_DATED" && intent.date) {
-    const rt = intent.roomType || fuzzyMatchRoom(message) || "標準雙人房";
-    if (isSpecialDate(intent.date)) { await replyToLine(replyToken, `這段期間（${intent.date}）為特殊節日，房價請聯絡櫃檯報價喔～`, env); return; }
-    const price = await fetchPriceFromD1(env.DB, rt, intent.date);
-    await replyToLine(replyToken, price ? `${intent.date} ${rt} 的價格是 NT$${price}。` : `${intent.date} ${rt} 的價格目前查不到，建議聯絡櫃檯確認喔～`, env);
-    return;
-  }
 
   // 9) 最後一般 GPT & Fallback
   try {
@@ -351,11 +323,17 @@ if (/(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車
   }
 
   await replyToLine(replyToken, [
-    "我還不太確定您的意思～您可以問我：",
-    "• 查詢房價（請輸入日期與房型）",
-    "• 看早餐照片 / 早餐菜單",
-    "• 看交誼廳或房型照片（輸入：景觀房照片）",
-    "• 詢問 Wi‑Fi、寄放行李、入住時間等～",
+    "不好意思，我不太明白您的問題 😅",
+    "不過，您可以直接問我以下這些常見問題喔！",
+    "",
+    "🙋 房型介紹：標準雙人/床房、景觀雙人房、經濟四人房、悠活四人房、男/女生背包床位",
+    "✅ 查房價：今天標準雙人房多少錢，或者查價區間+房型",
+    "✅ 看照片：房型+照片",
+    "✅ 找美食：附近有什麼好吃的",
+    "✅ 問設施：wifi密碼、停車資訊",
+    "✅ 問服務：服務時間、早餐、寄放行李",
+    "✅ 交通資訊：如何到快樂腳旅棧",
+    "✅ 其他：部分內容機器人無法回答得須稍待真人回覆哦",
   ].join("\n"), env);
 }
 
@@ -386,30 +364,68 @@ function extractDates(text) {
   const todayMatch = TODAY_WORDS.test(text);
   if (todayMatch) {
       const today = new Date();
-      return { startDate: today, endDate: today, isRange: false };
+      return { startDate: today, endDate: today, isRange: false, isNextYear: false };
   }
 
+  // 檢查是否為日期區間
   const rangeMatch = text.match(DATE_RANGE_WORDS);
   if (rangeMatch) {
-      const start = normalizeDate(rangeMatch[1]);
-      const end = normalizeDate(rangeMatch[2]); // 注意：使用者說的結束日期通常是退房日
-      if (start && end) {
-          // 旅客習慣說「住到N號」，指的是N號退房，所以實際住宿是到 N-1 號的晚上
-          const endDateObj = new Date(end);
-          endDateObj.setDate(endDateObj.getDate() - 1);
-          return { startDate: new Date(start), endDate: endDateObj, isRange: true };
+      const startStr = rangeMatch[1];
+      const endStr = rangeMatch[2];
+      const checkResult = isQueryForNextYear(startStr);
+
+      if (checkResult.isNextYear) {
+          // 如果起始日期就已經是明年，直接回傳，不需再處理
+          return { startDate: null, endDate: null, isRange: true, isNextYear: true, dateString: startStr };
       }
+
+      // 如果是今年的日期，才繼續處理
+      const startDate = new Date(checkResult.fullDate);
+      const endDateObj = new Date(isQueryForNextYear(endStr).fullDate);
+      endDateObj.setDate(endDateObj.getDate() - 1); // 旅客習慣說「住到N號」，指的是N號退房
+      
+      return { startDate, endDate: endDateObj, isRange: true, isNextYear: false };
   }
 
+  // 檢查是否為單一日期
   const singleMatch = text.match(DATE_WORDS);
   if (singleMatch) {
-      const date = normalizeDate(singleMatch[0]);
-      if (date) {
-          return { startDate: new Date(date), endDate: new Date(date), isRange: false };
+      const dateStr = singleMatch[0];
+      const checkResult = isQueryForNextYear(dateStr);
+      
+      if (checkResult.isNextYear) {
+          return { startDate: null, endDate: null, isRange: false, isNextYear: true, dateString: dateStr };
       }
+      
+      const date = new Date(checkResult.fullDate);
+      return { startDate: date, endDate: date, isRange: false, isNextYear: false };
   }
 
-  return { startDate: null, endDate: null, isRange: false };
+  return { startDate: null, endDate: null, isRange: false, isNextYear: false };
+}
+
+// *** 全新：判斷日期是否應為明年的輔助函式 ***
+// 這個函式會取代舊的 normalizeDate 的部分功能
+function isQueryForNextYear(dateStr) {
+    const match = dateStr.match(/(\d{1,2})[\/\-月](\d{1,2})/);
+    if (!match) return { isNextYear: false, fullDate: null };
+
+    const month = String(match[1]).padStart(2, "0");
+    const day = String(match[2]).padStart(2, "0");
+
+    const now = new Date();
+    let year = now.getFullYear();
+
+    // 建立一個忽略時間的「今天」日期物件來比較
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const prospectiveDate = new Date(`${year}-${month}-${day}`);
+
+    if (prospectiveDate < today) {
+        // 如果使用者查詢的日期比今天早，就認定是詢問明年
+        return { isNextYear: true, fullDate: `${year + 1}-${month}-${day}` };
+    }
+
+    return { isNextYear: false, fullDate: `${year}-${month}-${day}` };
 }
 
 
@@ -507,7 +523,7 @@ return SPECIAL_DATES.some(([start, end]) => mmdd >= start && mmdd <= end);
 async function replyToLine(replyToken, text, env) {
   try {
     let msg = String(text ?? "").trim();
-    if (!msg) msg = "抱歉，我這邊暫時查不到相關資訊，幫您請櫃檯確認一下～";
+    if (!msg) msg = "抱歉，我這邊暫時查不到相關資訊，請稍等真人櫃檯確認後會回覆您～";
     const res = await fetch("https://api.line.me/v2/bot/message/reply", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.CHANNEL_ACCESS_TOKEN}` },
@@ -673,7 +689,7 @@ async function callGPTGeneral(message, apiKey) {
 【回答規則】
 - 只回覆與旅棧/入住/在地資訊直接相關的內容；無關就婉拒並建議聯絡櫃台。
 - 用陳述句，不要提問或引導偏好，不要要求對方提供更多資訊。
-- 最多 5 行，條列清楚，避免寒暄。`;
+- 最多 5 行，條列清楚，避免寒暄，避免回答不在資料內的答案。`;
 
   const body = {
     model: "gpt-4o",
