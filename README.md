@@ -38,64 +38,71 @@ const CONFIG = {
   },
 
   // --- 按鈕 payload 設定 (讓程式碼更好讀) ---
-  ACTIONS: {
-    // --- 主選單 ---
-    MENU_PRICE: "查房價／問訂房",
-    MENU_FACILITY: "設施／服務",
-    MENU_FOOD: "在地美食推薦",
-    MENU_TRANSPORT: "交通指引",
-    MENU_CONTACT_HUMAN: "聯絡真人客服",
+// ================== 【已更新】的 ACTIONS 區塊 ==================
+ACTIONS: {
+  // --- 主選單 ---
+  MENU_PRICE: "查房價／問訂房",
+  MENU_FACILITY: "設施／服務",
+  MENU_FOOD: "在地美食推薦",
+  MENU_TRANSPORT: "交通指引",
+  MENU_CONTACT_HUMAN: "聯絡真人客服",
 
-    // --- 子選單動作 ---
-    PRICE_ASK: "action:ask_price",
-    PRICE_SHOW_ROOMS: "action:show_room_types",
-    FACILITY_WIFI: "action:show_wifi",
-    FACILITY_PARKING: "action:show_parking",
-    FACILITY_LUGGAGE: "action:show_luggage",
-    GUIDE_FOOD: "action:show_food",
-    GUIDE_SIGHTS: "action:show_sights",
-    GUIDE_CAFES: "action:show_cafes",
-    TRANSPORT_FROM_TRA: "action:from_tra",
-    TRANSPORT_FROM_HSR: "action:from_hsr",
-    TRANSPORT_BY_CAR: "action:by_car",
-    TRANSPORT_TRA_BUS: "action:tra_by_bus",
-    TRANSPORT_TRA_WALK: "action:tra_by_walk",
-    CONTACT_HUMAN: "action:contact_human",
+  // --- 子選單動作 ---
+  PRICE_ASK: "action:ask_price",
+  PRICE_SHOW_ROOMS: "action:show_room_types",
+  FACILITY_WIFI: "action:show_wifi",
+  FACILITY_PARKING: "action:show_parking",
+  FACILITY_LUGGAGE: "action:show_luggage",
+  GUIDE_FOOD: "action:show_food",
+  GUIDE_SIGHTS: "action:show_sights",
+  GUIDE_CAFES: "action:show_cafes",
+  TRANSPORT_FROM_TRA: "action:from_tra",
+  TRANSPORT_FROM_HSR: "action:from_hsr",
+  TRANSPORT_BY_CAR: "action:by_car",
+  TRANSPORT_TRA_BUS: "action:tra_by_bus",
+  TRANSPORT_TRA_WALK: "action:tra_by_walk",
+  CONTACT_HUMAN: "action:contact_human",
 
-    // --- 停車流程動作 ---
-    NAVIGATE_PARKING: "action:navigate_parking",
-    SHOW_PARKING_RULES: "action:show_parking_rules",
-  },
+  // --- 停車流程動作 ---
+  NAVIGATE_PARKING: "action:navigate_parking",
+  SHOW_PARKING_RULES: "action:show_parking_rules",
+
+  // ✨✨✨ 新增：房型卡片動作 ✨✨✨
+  ROOM_INTRO_PREFIX: "action:intro_", // 介紹房型的前綴
+  ROOM_PRICE_TODAY_PREFIX: "action:price_today_", // 查當日價的前綴
+  ROOM_PRICE_DATE_PREFIX: "action:price_date_", // 查指定日期價的前綴
+},
 
   // --- 正規表示式 (Regex) 意圖判斷區 ---
-// ================== 【已更新】的 INTENTS 區塊 ==================
-  INTENTS: {
-    // 將判斷拆分成更小的單位，方便組合
-    hasDate: /(今天|今日|\d{1,2}[\/\\-月]\d{1,2})/,
-    hasRoomType: /(悠活|家庭|四人|雙床|景觀|雙人|背包|房型)/i,
-    hasPriceWord: /(價|價格|費用|房價|多少)/i,
+// ================== 【已補全】的 INTENTS 區塊 ==================
+INTENTS: {
+  // 將判斷拆分成更小的單位，方便組合
+  hasDate: /(今天|今日|\d{1,2}[\/\\-月]\d{1,2})/,
+  hasRoomType: /(悠活|家庭|四人|雙床|景觀|雙人|背包|房型)/i,
+  hasPriceWord: /(價|價格|費用|房價|多少)/i,
 
-    isBreakfastPhotoQuery: /(早餐).*?(照片|圖片|相片)/i,
-    isTransportationQuery: /(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車|搭車|公車|轉乘|到(快樂腳旅棧|中華路一段185號))/i,
-    isFoodQuery: /(附近|周邊|周遭).*?(美食|餐廳|小吃|酒吧|吃的|好吃|夜市)|美食推薦|吃什麼|推薦美食|要吃什麼/i,
-    isParkingQuery: /(停車|停車位)/i,
-    isPhotoQuery: /(照片|圖片|相片)/i,
-    },
-    // 檢查邏輯更嚴謹
-    isDateOnlyQuery: (msg) => {
-      const hasDate = /(\d{1,2}[\/\\-月]\d{1,2})/.test(msg);
-      const hasRoomType = /(悠活|家庭|四人|雙床|景觀|雙人|背包)/i.test(msg);
-      const hasPriceWord = /(價|價格|費用|房價|多少)/i.test(msg);
-      return hasDate && !hasRoomType && !hasPriceWord;
-    },
-    isPriceQuery: (msg) => {
-      const hasDate = /(\d{1,2}[\/\\-月]\d{1,2})/.test(msg) || /(今天|今日)/i.test(msg);
-      const hasRoomType = /(悠活|家庭|四人|雙床|景觀|雙人|背包)/i.test(msg);
-      const hasPriceWord = /(價|價格|費用|房價|多少)/i.test(msg);
-      return hasPriceWord || (hasDate && hasRoomType);
-    },
-    isTodayQuery: /(今天|今日)/i,
-  
+  isBreakfastPhotoQuery: /(早餐).*?(照片|圖片|相片)/i,
+  isTransportationQuery: /(怎麼去|怎麼到|如何到|怎樣到|路線|走路|步行|開車|騎車|搭車|公車|轉乘|到(快樂腳旅棧|中華路一段185號))/i,
+  isFoodQuery: /(附近|周邊|周遭).*?(美食|餐廳|小吃|酒吧|吃的|好吃|夜市)|美食推薦|吃什麼|推薦美食|要吃什麼/i,
+  isParkingQuery: /(停車|停車位)/i,
+  isPhotoQuery: /(照片|圖片|相片)/i,
+
+  // 檢查邏輯更嚴謹
+  isDateOnlyQuery: (msg) => {
+    const hasDate = /(\d{1,2}[\/\\-月]\d{1,2})/.test(msg);
+    const hasRoomType = /(悠活|家庭|四人|雙床|景觀|雙人|背包)/i.test(msg);
+    const hasPriceWord = /(價|價格|費用|房價|多少)/i.test(msg);
+    return hasDate && !hasRoomType && !hasPriceWord;
+  },
+  isPriceQuery: (msg) => {
+    const hasDate = /(今天|今日|\d{1,2}[\/\\-月]\d{1,2})/.test(msg);
+    const hasRoomType = /(悠活|家庭|四人|雙床|景觀|雙人|背包)/i.test(msg);
+    const hasPriceWord = /(價|價格|費用|房價|多少)/i.test(msg);
+    return hasPriceWord || (hasDate && hasRoomType);
+  },
+  // ✨✨✨ 這一行就是之前遺失的設定 ✨✨✨
+  isTodayQuery: /(今天|今日)/i,
+},
   
 // ================== 【已修正】的 QUICK_REPLIES 區塊 ==================
 
@@ -203,21 +210,59 @@ async function handleEvent({ message, replyToken, env }) {
   return await handleGenericFallback(context);
 }
 
-// =================================================================
-// Part 4: 處理函式 (Handlers)
-// 每個函式只負責一件事情，讓程式碼更容易維護
-// =================================================================
-
 // --- 處理按鈕點擊 ---
 // =================================================================
 // Part 4: 處理函式 (Handlers)
 // 每個函式只負責一件事情，讓程式碼更容易維護
 // =================================================================
 
-// --- 處理按鈕點擊 ---
 async function handleAction({ message, replyToken, env }) {
   const context = { message, replyToken, env };
 
+  // --- 處理房型卡片按鈕 ---
+  if (message.startsWith(CONFIG.ACTIONS.ROOM_INTRO_PREFIX)) {
+    const roomId = message.replace(CONFIG.ACTIONS.ROOM_INTRO_PREFIX, "");
+    
+    // 再次讀取房型總表，找到對應的房型
+    const allRooms = await env.KV_ROOM.get("room_master_data", "json");
+    const targetRoom = allRooms.find(room => room.id === roomId);
+
+    if (targetRoom) {
+      // 組合出詳細的介紹文字
+      const features = targetRoom.features.map(f => `✓ ${f}`).join("\n");
+      const introText = `【${targetRoom.name}】\n\n${targetRoom.detailedIntro}\n\n✨ 房型特色：\n${features}`;
+      
+      // 先傳送詳細介紹
+      await replyToLine(replyToken, introText, env);
+      
+      // 接著，如果有很多張照片，可以再追加傳送
+      if (targetRoom.photos && targetRoom.photos.length > 1) {
+          const photos = targetRoom.photos.slice(0, 5).map(url => ({ 
+              type: "image", 
+              originalContentUrl: url, 
+              previewImageUrl: url 
+          }));
+          // 注意：追加傳送需要使用不同的 Push API，這裡我們先引導使用者
+          await replyToLine(replyToken, `想看「${targetRoom.name}」的更多照片嗎？請直接輸入：「${targetRoom.name}照片」`, env);
+      }
+    } else {
+      await replyToLine(replyToken, "抱歉，找不到該房型的詳細資訊。", env);
+    }
+    return;
+  }
+
+  if (message.startsWith(CONFIG.ACTIONS.ROOM_PRICE_TODAY_PREFIX)) {
+    const roomType = message.replace(CONFIG.ACTIONS.ROOM_PRICE_TODAY_PREFIX, "");
+    const simulatedMessage = `今天 ${roomType} 價格`;
+    return await handlePriceCalculation({ message: simulatedMessage, replyToken, env });
+  }
+
+  if (message.startsWith(CONFIG.ACTIONS.ROOM_PRICE_DATE_PREFIX)) {
+    const roomType = message.replace(CONFIG.ACTIONS.ROOM_PRICE_DATE_PREFIX, "");
+    const prompt = `好的，您選擇了查詢「${roomType}」。\n\n為了給您最準確的報價，請務必用【日期 + 房型】的格式回覆我喔！\n\n👇 請像這樣輸入 👇\n「12/24-12/26 ${roomType}」`;
+    return await replyToLine(replyToken, prompt, env);
+  }
+  
   // 根據我們在 CONFIG 中定義的 ACTION payload 來決定要做什麼
   switch (message) {
     // --- 停車流程 ---
@@ -345,20 +390,41 @@ async function handleContactHuman({ replyToken, env }) {
 }
 
 // --- 處理實際功能 (之前已有的函式) ---
+// ================== 【已升級】的 handleRoomTypeCarousel 函式 ==================
 async function handleRoomTypeCarousel({ replyToken, env }) {
-    const roomCards = [
-        {
-            imageUrl: "https://i.imgur.com/your-image-1.jpg", // 請替換成您的圖片網址
-            title: "景觀雙人房", text: "高樓層市景，享受台中百萬夜景。",
-            buttons: [ { label: "看更多照片", payload: "景觀雙人房照片" }, { label: "查這間房價", payload: CONFIG.ACTIONS.PRICE_ASK } ]
-        },
-        {
-            imageUrl: "https://i.imgur.com/your-image-2.jpg", // 請替換成您的圖片網址
-            title: "經濟四人房", text: "空間寬敞，CP值首選，適合家庭出遊。",
-            buttons: [ { label: "看更多照片", payload: "經濟四人房照片" }, { label: "查這間房價", payload: CONFIG.ACTIONS.PRICE_ASK } ]
-        }
-    ];
-    await replyWithCarousel(replyToken, "我們的房型介紹", roomCards, env);
+  try {
+      const allRooms = await env.KV_ROOM.get("room_master_data", "json");
+      if (!allRooms || !Array.isArray(allRooms) || allRooms.length === 0) {
+          return await replyToLine(replyToken, "抱歉，目前找不到房型資料。", env);
+      }
+
+      const roomCards = allRooms.map(room => ({
+          imageUrl: room.imageUrl,
+          title: room.name,
+          text: room.text, // 顯示簡短介紹
+          buttons: [
+              { 
+                  label: "🛌 房型詳細介紹", 
+                  payload: `${CONFIG.ACTIONS.ROOM_INTRO_PREFIX}${room.id}`
+              },
+              { 
+                  label: "💰 查今日房價", 
+                  payload: `${CONFIG.ACTIONS.ROOM_PRICE_TODAY_PREFIX}${room.name}` 
+              },
+              { 
+                  label: "📅 查其他日期", 
+                  payload: `${CONFIG.ACTIONS.ROOM_PRICE_DATE_PREFIX}${room.name}`
+              }
+          ]
+      }));
+
+      // Line 的輪播卡片一次最多只能顯示 10 張
+      await replyWithCarousel(replyToken, "為您介紹我們的所有房型", roomCards.slice(0, 10), env);
+
+  } catch (e) {
+      console.error("💥 處理房型輪播卡片失敗:", e);
+      await replyToLine(replyToken, CONFIG.MESSAGES.GENERIC_ERROR, env);
+  }
 }
 
 async function handleFoodCarousel({ replyToken, env }) {
@@ -379,45 +445,57 @@ async function handleFoodCarousel({ replyToken, env }) {
 
 // --- 處理房型照片 ---
 async function handlePhoto({ message, replyToken, env }) {
-    if (message.trim() === '照片' || message.trim() === '相片') {
-        return await handleAction({ message: CONFIG.ACTIONS.SHOW_ROOM_TYPE_PHOTOS, replyToken, env });
-    }
-    try { 
-        const roomPhotoKV = await env.KV_ROOM?.get?.("room_photos", "json");
-        const { roomType } = extractRoomAndDate(message);
-        if (roomType && roomPhotoKV && roomPhotoKV[roomType]) {
-            const urls = roomPhotoKV[roomType];
-            const photos = urls.slice(0, 5).map(url => ({ type: "image", originalContentUrl: url, previewImageUrl: url }));
-            await replyToLineMultiple(replyToken, photos, env);
-        } else {
-            // 如果找不到特定房型照片，也用按鈕引導
-            await handleAction({ message: CONFIG.ACTIONS.SHOW_ROOM_TYPE_PHOTOS, replyToken, env });
-        }
-    } catch (e) {
-        console.error("💥 房型照片處理失敗:", e);
-        await replyToLine(replyToken, CONFIG.MESSAGES.GENERIC_ERROR, env);
-    }
+  try {
+      const allRooms = await env.KV_ROOM.get("room_master_data", "json");
+      if (!allRooms) throw new Error("無法讀取房型資料");
+
+      // 嘗試從使用者的訊息中，找出他想看的房型
+      const roomType = fuzzyMatchRoom(message);
+      
+      if (roomType) {
+          // 在我們的房型總表中尋找匹配的房型
+          const targetRoom = allRooms.find(room => room.name === roomType);
+          if (targetRoom && targetRoom.photos && targetRoom.photos.length > 0) {
+              // 如果找到了，就回傳該房型所有的照片 (最多5張)
+              const photos = targetRoom.photos.slice(0, 5).map(url => ({ 
+                  type: "image", 
+                  originalContentUrl: url, 
+                  previewImageUrl: url 
+              }));
+              await replyToLineMultiple(replyToken, photos, env);
+              return;
+          }
+      }
+      
+      // 如果找不到特定房型，或使用者只說「照片」，就用按鈕引導
+      await handleAction({ message: CONFIG.ACTIONS.SHOW_ROOM_TYPE_PHOTOS, replyToken, env });
+
+  } catch (e) {
+      console.error("💥 房型照片處理失敗:", e);
+      await replyToLine(replyToken, CONFIG.MESSAGES.GENERIC_ERROR, env);
+  }
 }
 
-// --- 處理只給日期的詢問 ---
+// --- 處理只給日期的詢問---
 async function handleDateOnly({ replyToken, env }, dateStr) {
-  // `dateStr` 就是我們從 handleEvent 傳進來的日期字串，例如 "11/3-11/15"
-  
-  const text = "好的，請問您想查詢的房型是？";
-  
-  // ✨ 關鍵修改處 ✨
-  // 我們使用傳進來的 `dateStr` 來動態組合 payload
-  const buttons = [
-    { label: "標準雙人房", payload: `${dateStr} 標準雙人房` },
-    { label: "景觀雙人房", payload: `${dateStr} 景觀雙人房` },
-    { label: "經濟四人房", payload: `${dateStr} 經濟四人房` },
-  ];
-  await replyWithButtons(replyToken, text, buttons, env);
+  // 步驟 1 & 2: 確認已知資訊，並詢問缺少資訊
+  const text = `好的，您選擇的日期是「${dateStr}」。\n請問您想查詢哪一種房型呢？`;
+
+  // 步驟 3: 提供所有主要房型作為快速回覆選項
+  const roomTypes = ["標準雙人房", "景觀雙人房", "標準雙床房", "經濟四人房", "悠活四人房", "背包床位"];
+
+  const quickReplies = roomTypes.map(room => ({
+    label: room, // 按鈕上顯示的文字，例如 "標準雙人房"
+    payload: `${dateStr} ${room}` // 點擊後，傳送的訊息會是 "11/3-11/15 標準雙人房"
+  }));
+
+  await replyWithQuickReplies(replyToken, text, quickReplies, env);
 }
 
 // --- 處理房價(自然語言) ---
 async function handlePriceCalculation({ message, replyToken, env }) {
   try {
+    // 注意：這裡的 fuzzyMatchRoom 和 extractDates 依賴 `message` 這個變數
     let roomType = fuzzyMatchRoom(message);
     const dateInfo = extractDates(message, CONFIG.INTENTS.isTodayQuery);
 
@@ -459,7 +537,7 @@ async function handlePriceCalculation({ message, replyToken, env }) {
       await replyToLine(replyToken, CONFIG.MESSAGES.PRICE_NOT_FOUND(formatDate(dateInfo.startDate), roomType), env);
     }
   } catch (e) {
-    console.error("💥 房價查詢處理失敗:", e);
+    console.error("💥 房價查詢處理失敗:", message, e); // 增加日誌，方便追蹤
     await replyToLine(replyToken, CONFIG.MESSAGES.GENERIC_ERROR, env);
   }
 }
@@ -514,6 +592,36 @@ async function replyToLineMultiple(replyToken, messages, env) {
     if (!res.ok) console.error("❌ LINE 多訊息回覆失敗：", await res.text());
   } catch (err) {
     console.error("💥 replyToLineMultiple 發生例外：", err);
+  }
+}
+
+async function replyWithQuickReplies(replyToken, text, quickReplies, env) {
+  const messages = [{
+    type: "text",
+    text: text,
+    quickReply: {
+      items: quickReplies.map(qr => ({
+        type: "action",
+        action: {
+          type: "message",
+          label: qr.label, // 顯示給使用者看的按鈕文字
+          text: qr.payload  // 使用者點擊後，實際傳送給我們的訊息
+        }
+      }))
+    }
+  }];
+
+  try {
+    const res = await fetch("https://api.line.me/v2/bot/message/reply", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.CHANNEL_ACCESS_TOKEN}` },
+      body: JSON.stringify({ replyToken, messages })
+    });
+    if (!res.ok) {
+      console.error("❌ LINE 快速回覆失敗:", await res.text());
+    }
+  } catch (err) {
+    console.error("💥 replyWithQuickReplies 發生例外：", err);
   }
 }
 
